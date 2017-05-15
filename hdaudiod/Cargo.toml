@@ -1,0 +1,7 @@
+[package]
+name = "hdaudiod"
+version = "0.1.0"
+
+[dependencies]
+redox_event = { git = "https://github.com/redox-os/event.git" }
+redox_syscall = "0.1"
