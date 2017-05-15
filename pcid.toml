@@ -79,3 +79,10 @@ class = 12
 subclass = 3
 interface = 48
 command = ["xhcid", "$NAME", "$BAR0", "$IRQ"]
+
+# hdaudiod
+[[drivers]]
+name = "HD Audio"
+class = 4
+subclass = 3
+command = ["hdaudiod", "$NAME", "$BAR0", "$BAR1", "$IRQ"]
