@@ -1,12 +1,14 @@
 extern crate event;
 extern crate syscall;
+extern crate spmc;
 
-use std::env;
+use std::{env, thread};
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use std::io::{Read, Write, Result};
+use std::sync::mpsc;
+use std::rc::Rc;
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
 
 use event::EventQueue;
 use syscall::flag::MAP_WRITE;
@@ -35,29 +37,66 @@ fn main() {
     // Daemonize
     if unsafe { syscall::clone(0).unwrap() } == 0 {
         let address = unsafe { syscall::physmap(bar, 0x180, MAP_WRITE).expect("failed to map address") };        
-        let dev_lock = unsafe { Arc::new(Mutex::new(device::HDAudio::new(address).expect("failed to allocate device"))) };
+        let mut device = Rc::new(RefCell::new(unsafe { device::HDAudio::new(address).expect("failed to allocate device") }));
+        let (verb_tx, verb_rx) = mpsc::channel::<u32>();
+        let (resp_tx, resp_rx) = spmc::channel::<u64>();
 
-        let mut event_queue = EventQueue::<usize>::new().expect("failed to create event queue");
+//        let mut event_queue = EventQueue::<usize>::new().expect("failed to create event queue");
         let mut irq_file = File::open(format!("irq:{}", irq)).expect("failed to open irq file");
 
-        event_queue.add(irq_file.as_raw_fd(), move |_count: usize| -> Result<Option<usize>> {
+        let mut device_irq = device.clone();
+/*        event_queue.add(irq_file.as_raw_fd(), move |_count: usize| -> Result<Option<usize>> {
             let mut irq = [0u8; 8];
             irq_file.read(&mut irq)?;
-            println!("Received interrupt: {:?}", irq);
+            let mut dev = device_irq.borrow_mut();
+            if dev.irq() {
+                println!("Interrupt {:?} is from HD Audio controller", irq);
+                if dev.read::<u8>(device::RIRBSTS) | 1 == 1 {
+                    println!("Interrupt is from RIRB");
+                    let mut response: u64 = 0;
+                    if let Some(v) = dev.read_response() {
+                        response = v;
+                    } else {
+                        println!("what the hell");
+                    }
+                    println!("Received response: {:X}", response);
+                    resp_tx.send(response);
+                    dev.flag(device::RIRBSTS, 1, true);
+                }
+            }
             Ok(None)
         }).expect("failed to catch events on irq file");
+*/
+        let mut statests: u16 = 0;
+        {
+            let dev = device.borrow();
+            let _statests = {
+                dev.read::<u16>(device::STATESTS)
+            };
+            dev.flag(device::STATESTS, statests as u32, true);
+            dev.flag(device::WAKEEN, statests as u32, true);
+            statests = _statests;
+        }
 
-        let statests = unsafe {
-            let dev = dev_lock.lock().unwrap();
-            dev.read::<u16>(device::STATESTS)
-        };
         for i in 0u8..15 {
-            let locked = device.lock().unwrap();
             if statests & (1 << i) != 0 {
                 println!("   - SDI {} present", i);
-                let arc_new = dev_lock.clone();
-                locked.codecs.push(Codec::new(arc_new, i).init());
+                Codec::new(verb_tx.clone(), resp_rx.clone(), i);
             }
+        }
+        
+
+        loop {
+            let mut dev = device.borrow_mut();
+            if let Ok(v) = verb_rx.try_recv() {
+                dev.send_verb(v);
+                println!(" + Sent verb: {:08X}", v);
+            }
+            if let Some(r) = dev.read_response() {
+                println!("Got response!");
+                resp_tx.send(r);
+            }
+            thread::yield_now();
         }
     }
 }
