@@ -9,6 +9,9 @@ use codec::Codec;
 pub const GCAP: u32 = 0x00;
 pub const _64OK: u32 = 0x01;
 
+pub const VMIN: u32 = 0x02;
+pub const VMAJ: u32 = 0x03;
+
 pub const GCTL: u32 = 0x08;
 pub const CRST: u32 = 0x01;
 pub const GCTL_UNSOL: u32 = 0x01 << 8;
@@ -31,7 +34,7 @@ pub const CORBRP: u32 = 0x4A;
 pub const CORB_RPRST: u16 = 0x01 << 15;
 
 pub const CORBCTL: u32 = 0x4C;
-pub const CORB_RUN: u32 = 0x01 << 1;
+pub const CORB_RUN: u8 = 0x01 << 1;
 
 pub const CORBSTS: u32 = 0x4D;
 
@@ -137,6 +140,8 @@ impl HDAudio {
             thread::yield_now();
         }
 
+        println!("Major Version: {}, Minor Version: {}", self.read::<u8>(VMAJ), self.read::<u8>(VMIN));
+
         self.long_address = self.read::<u32>(GCAP) & _64OK == _64OK;
 
         thread::sleep(time::Duration::new(1, 000_000));
@@ -146,13 +151,11 @@ impl HDAudio {
         self.flag(INTCTL, CIE, true);
 
         self.init_corb();
-
         self.init_rirb();
-
     }
 
     fn init_corb(&self) {
-        self.flag(CORBCTL, CORB_RUN, false);
+        self.write::<u8>(CORBCTL, 0);
 
         if self.read::<u8>(CORBSIZE) & 64 != 64 {
             panic!("CORBSIZE too small")
@@ -175,7 +178,6 @@ impl HDAudio {
             }
         }
 
-
         self.flag(CORBRP, CORB_RPRST as u32, true);
         while self.read::<u16>(CORBRP) & CORB_RPRST != CORB_RPRST {
             thread::yield_now();
@@ -186,8 +188,11 @@ impl HDAudio {
             thread::yield_now();
         }
 
-        self.write(CORBWP, 0 as u8);
-        self.write(CORBCTL, CORB_RUN as u8);
+        self.write(CORBWP, 0 as u16);
+        self.write(CORBCTL, CORB_RUN);
+        while self.read::<u8>(CORBCTL) & CORB_RUN == 0 {
+            thread::yield_now();
+        }
         println!("CORBCTL: {:08b}\nCORBSTS: {:08b}", self.read::<u8>(CORBCTL), self.read::<u8>(CORBSTS));
     }
 
@@ -209,7 +214,6 @@ impl HDAudio {
         self.write(RIRBUBASE, (self.rirb.physical() >> 32) as u32);
 
         self.flag(RIRBWP, RIRBWPRST as u32, true);
-
         self.flag(RIRBCTL, RIRBDMAEN, true);
     }
 
