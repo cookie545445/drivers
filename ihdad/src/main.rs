@@ -59,8 +59,6 @@ fn main() {
 			let vend_prod:u32 = ((vend as u32) << 16) | (prod as u32);
 
 			let device = Arc::new(RefCell::new(unsafe { HDA::IntelHDA::new(address, vend_prod).expect("ihdad: failed to allocate device") }));
-			let socket_fd = syscall::open(":audio", syscall::O_RDWR | syscall::O_CREAT | syscall::O_NONBLOCK).expect("IHDA: failed to create audio scheme");
-			let socket = Arc::new(RefCell::new(unsafe { File::from_raw_fd(socket_fd) }));
 
 			let mut event_queue = EventQueue::<usize>::new().expect("IHDA: Could not create event queue.");
 
@@ -70,19 +68,21 @@ fn main() {
 
 			let todo_irq = todo.clone();
 			let device_irq = device.clone();
-			let socket_irq = socket.clone();
 			let device_loop = device.clone();
 
 			event_queue.add(irq_file.as_raw_fd(), move |_event| -> Result<Option<usize>> {
 				let mut irq = [0; 8];
 				irq_file.read(&mut irq)?;
 
-				let _irq = unsafe { device_irq.borrow_mut().irq()};
+				let mut device = device_irq.borrow_mut();
+				let _irq = unsafe { device.irq() };
 
 				if _irq {
 					irq_file.write(&mut irq)?;
-
-					let mut todo = todo_irq.borrow_mut();
+					for &(fd, _, _) in device.output_streams.iter() {
+						unsafe { syscall::call::fsync(fd).unwrap(); }
+					}
+/*					let mut todo = todo_irq.borrow_mut();
 					let mut i = 0;
 					while i < todo.len() {
 						let a = todo[i].a;
@@ -94,7 +94,7 @@ fn main() {
 							socket_irq.borrow_mut().write(&mut todo[i])?;
 							todo.remove(i);
 						}
-					}
+					}*/
 					/*
 					let next_read = device_irq.next_read();
 					if next_read > 0 {
@@ -103,7 +103,7 @@ fn main() {
 				}
 				Ok(Some(0))
 			}).expect("IHDA: failed to catch events on IRQ file");
-			let socket_fd = socket.borrow().as_raw_fd();
+/*			let socket_fd = socket.borrow().as_raw_fd();
 			let socket_packet = socket.clone();
 			event_queue.add(socket_fd, move |_event| -> Result<Option<usize>> {
 				loop {
@@ -130,9 +130,10 @@ fn main() {
 				}*/
 
 				Ok(None)
-			}).expect("IHDA: failed to catch events on IRQ file");
+			}).expect("IHDA: failed to catch events on IRQ file");*/
 
-			for event_count in event_queue.trigger_all(event::Event {
+
+/*			for event_count in event_queue.trigger_all(event::Event {
 				fd: 0,
 				flags: 0,
 			}).expect("IHDA: failed to trigger events") {
@@ -146,7 +147,7 @@ fn main() {
 					c: syscall::flag::EVENT_READ,
 					d: event_count
 				}).expect("IHDA: failed to write event");
-			}
+			}*/
 
 			loop {
 				{
@@ -154,7 +155,7 @@ fn main() {
 				}
 				let event_count = event_queue.run().expect("IHDA: failed to handle events");
 
-				socket.borrow_mut().write(&Packet {
+/*				socket.borrow_mut().write(&Packet {
 					id: 0,
 					pid: 0,
 					uid: 0,
@@ -163,7 +164,7 @@ fn main() {
 					b: 0,
 					c: syscall::flag::EVENT_READ,
 					d: event_count
-				}).expect("IHDA: failed to write event");
+				}).expect("IHDA: failed to write event");*/
 			}
 		}
 

@@ -16,7 +16,7 @@ extern crate syscall;
 
 use syscall::MAP_WRITE;
 use syscall::error::{Error, EACCES, EBADF, Result, EINVAL};
-use syscall::flag::{SEEK_SET, SEEK_CUR, SEEK_END};
+use syscall::flag::{SEEK_SET, SEEK_CUR, SEEK_END, O_CREAT, O_RDONLY};
 use syscall::io::{Mmio, Io};
 use syscall::scheme::SchemeMut;
 
@@ -160,7 +160,8 @@ pub struct IntelHDA {
 	buff_desc_phys: usize,
 	
 	
-	output_streams:         Vec<OutputStream>,
+//	output_streams:         Vec<OutputStream>,
+	pub output_streams:	Vec<(usize, usize, &'static StreamDescriptorRegs)>,
 
 	buffs: Vec<Vec<StreamBuffer>>,
 
@@ -229,7 +230,7 @@ impl IntelHDA {
 
 
 
-			output_streams: Vec::<OutputStream>::new(),
+			output_streams: Vec::new(),
 
 
 			buffs: Vec::<Vec<StreamBuffer>>::new(),
@@ -516,21 +517,22 @@ impl IntelHDA {
 
 		let r = self.get_output_stream_descriptor(0).unwrap();
 
-		
-		self.output_streams.push(OutputStream::new(2, 0x4000, r));
+		let fd = syscall::call::open("audio:ihda0?buf_sz=0x4000", O_CREAT | O_RDONLY).unwrap();
+		let buf = unsafe { syscall::call::fmap(fd, 0, 0x4000).unwrap() };
+		self.output_streams.push((fd, buf, r));
 
 		let o = self.output_streams.get_mut(0).unwrap();
 
 
-		self.buff_desc[0].set_address(o.phys());
-		self.buff_desc[0].set_length(o.block_size() as u32);
+		self.buff_desc[0].set_address(buf);
+		self.buff_desc[0].set_length(0x4000);
 		self.buff_desc[0].set_interrupt_on_complete(true);		
 
-		
+		/*
 		self.buff_desc[1].set_address(o.phys() + o.block_size());
 		self.buff_desc[1].set_length(o.block_size() as u32);
 		self.buff_desc[1].set_interrupt_on_complete(true);
-		
+		*/
 
 	}
 
@@ -821,7 +823,7 @@ impl IntelHDA {
 	
 	}
 
-	pub fn write_to_output(&mut self, index:u8, buf: &[u8]) -> Result<usize> {
+/*	pub fn write_to_output(&mut self, index:u8, buf: &[u8]) -> Result<usize> {
 
 		let mut output = self.get_output_stream_descriptor(index as usize).unwrap();
 		let mut os = self.output_streams.get_mut(index as usize).unwrap();
@@ -858,7 +860,7 @@ impl IntelHDA {
 		let len = min(os.block_size(), buf.len());
 		
 		os.write_block(buf)
-	}
+	}*/
 
 	pub fn handle_interrupts(&mut self) {
 
@@ -965,11 +967,13 @@ impl IntelHDA {
 impl Drop for IntelHDA {
 	fn drop(&mut self) {
 		print!("IHDA: Deallocating IHDA driver.\n");
-
+		for &(fd, _, _) in self.output_streams.iter() {
+			syscall::call::close(fd);
+		}
 	}
 }
 
-
+/*
 impl SchemeMut for IntelHDA {
 
 	
@@ -1031,3 +1035,4 @@ impl SchemeMut for IntelHDA {
     	}
 
 }
+*/
